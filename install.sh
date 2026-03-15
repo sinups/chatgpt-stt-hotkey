@@ -29,38 +29,79 @@ if [[ ! -d "/Applications/ChatGPT.app" ]]; then
 fi
 echo "✓ ChatGPT.app"
 
-# ─── Python с pyobjc ───
-PYTHON=""
-for p in \
-    /Library/Frameworks/Python.framework/Versions/3.*/bin/python3 \
-    /opt/homebrew/bin/python3 \
-    /usr/local/bin/python3; do
-    if [[ -x "$p" ]] && "$p" -c "import Quartz, AppKit" 2>/dev/null; then
-        PYTHON="$p"
-        break
-    fi
-done
-
-if [[ -z "$PYTHON" ]]; then
-    echo "❌ Python 3 с pyobjc не найден"
-    echo ""
-    echo "   brew install python@3.12"
-    echo "   pip3 install pyobjc-framework-Quartz pyobjc-framework-Cocoa"
-    exit 1
-fi
-echo "✓ Python: $PYTHON"
-
-# ─── Homebrew + cliclick ───
+# ─── Homebrew ───
 if ! command -v brew &>/dev/null; then
-    echo "❌ Homebrew → https://brew.sh"
-    exit 1
+    echo "→ Устанавливаю Homebrew..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    # Добавляем в PATH для текущей сессии
+    if [[ -f /opt/homebrew/bin/brew ]]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [[ -f /usr/local/bin/brew ]]; then
+        eval "$(/usr/local/bin/brew shellenv)"
+    fi
 fi
+echo "✓ Homebrew"
 
+# ─── cliclick ───
 if ! command -v cliclick &>/dev/null; then
     echo "→ Устанавливаю cliclick..."
     brew install cliclick
 fi
 echo "✓ cliclick"
+
+# ─── Python с pyobjc ───
+find_python() {
+    for p in \
+        /Library/Frameworks/Python.framework/Versions/3.*/bin/python3 \
+        /opt/homebrew/bin/python3 \
+        /usr/local/bin/python3; do
+        if [[ -x "$p" ]] && "$p" -c "import Quartz, AppKit" 2>/dev/null; then
+            echo "$p"
+            return 0
+        fi
+    done
+    return 1
+}
+
+PYTHON="$(find_python || true)"
+
+# Нет Python или нет pyobjc — ставим
+if [[ -z "$PYTHON" ]]; then
+    # Проверяем есть ли Python вообще
+    HAVE_PY=""
+    for p in \
+        /Library/Frameworks/Python.framework/Versions/3.*/bin/python3 \
+        /opt/homebrew/bin/python3 \
+        /usr/local/bin/python3; do
+        if [[ -x "$p" ]]; then
+            HAVE_PY="$p"
+            break
+        fi
+    done
+
+    if [[ -z "$HAVE_PY" ]]; then
+        echo "→ Устанавливаю Python..."
+        brew install python@3.12
+        HAVE_PY="$(brew --prefix python@3.12)/bin/python3"
+    fi
+
+    # Ставим pyobjc
+    echo "→ Устанавливаю pyobjc..."
+    "$HAVE_PY" -m pip install --quiet pyobjc-framework-Quartz pyobjc-framework-Cocoa 2>/dev/null \
+        || "$HAVE_PY" -m pip install --quiet --break-system-packages pyobjc-framework-Quartz pyobjc-framework-Cocoa 2>/dev/null \
+        || pip3 install --quiet pyobjc-framework-Quartz pyobjc-framework-Cocoa 2>/dev/null
+
+    PYTHON="$(find_python || true)"
+fi
+
+if [[ -z "$PYTHON" ]]; then
+    echo "❌ Не удалось настроить Python с pyobjc"
+    echo "   Попробуйте вручную:"
+    echo "   brew install python@3.12"
+    echo "   pip3 install pyobjc-framework-Quartz pyobjc-framework-Cocoa"
+    exit 1
+fi
+echo "✓ Python: $PYTHON"
 
 # ─── Скачиваем ───
 echo "→ Скачиваю..."
