@@ -78,7 +78,10 @@ stt-status    # Service status + recent log
 stt-restart   # Restart the service
 stt-stop      # Stop the service
 stt-log       # View full log
+stt-update    # Pull latest version & restart
 ```
+
+The service checks for updates every 6 hours and shows a macOS notification when a new version is available.
 
 ## 🗑️ Uninstall
 

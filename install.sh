@@ -217,6 +217,7 @@ if [[ -f "$RC" ]] && ! grep -q "chatgpt-stt" "$RC" 2>/dev/null; then
         echo "alias stt-restart='launchctl unload $PLIST 2>/dev/null; launchctl load $PLIST && echo \"STT restarted\"'"
         echo "alias stt-stop='launchctl unload $PLIST 2>/dev/null && echo \"STT stopped\"'"
         echo "alias stt-log='tail -20 /tmp/chatgpt-stt.log'"
+        echo "alias stt-update='cd $DIR && git pull && launchctl unload $PLIST 2>/dev/null; launchctl load $PLIST && echo \"STT updated & restarted\"'"
     } >> "$RC"
     echo "✓ Алиасы (source $RC)"
 fi
