@@ -332,18 +332,30 @@ def do_recording():
         # 0. Закрываем зависший виджет если есть
         _force_close()
 
-        # 1. Открываем виджет
+        # 1. Открываем виджет (поллинг вместо sleep)
         _open_widget()
-        time.sleep(0.8)
+        widget_ready = False
+        for _ in range(20):  # макс 1 сек
+            time.sleep(0.05)
+            if _has_widget():
+                widget_ready = True
+                break
 
-        if not _has_widget():
-            time.sleep(0.3)
+        if not widget_ready:
             _open_widget()
-            time.sleep(0.8)
+            for _ in range(20):
+                time.sleep(0.05)
+                if _has_widget():
+                    widget_ready = True
+                    break
+
+        if not widget_ready:
+            log("[!] Виджет не открылся")
+            return
 
         # 2. Очищаем поле
         _clear_widget()
-        time.sleep(0.15)
+        time.sleep(0.1)
 
         # 3. Кликаем микрофон (кэш или поиск)
         mic_x, mic_y = None, None
@@ -367,23 +379,34 @@ def do_recording():
             return
 
         _click(mic_x, mic_y)
-        time.sleep(0.5)
 
-        # 4. Проверяем запись
-        bc = _btn_count()
-        if bc > 4 or bc == 0:
+        # Поллим начало записи (вместо sleep 0.5)
+        rec_started = False
+        for _ in range(15):  # макс 0.75 сек
+            time.sleep(0.05)
+            bc = _btn_count()
+            if 0 < bc <= 4:
+                rec_started = True
+                break
+
+        if not rec_started:
+            # Retry: сбрасываем кэш, ищем заново
             _cached_mic_dx = None
             _cached_mic_dy = None
             mic_info = _find_mic_in_widget()
             if mic_info:
                 _click(int(mic_info['x']), int(mic_info['y']))
-                time.sleep(0.5)
-                bc = _btn_count()
+                for _ in range(15):
+                    time.sleep(0.05)
+                    bc = _btn_count()
+                    if 0 < bc <= 4:
+                        rec_started = True
+                        break
 
-            if bc > 4 or bc == 0:
-                log("[!] Запись не началась")
-                _force_close()
-                return
+        if not rec_started:
+            log("[!] Запись не началась")
+            _force_close()
+            return
 
         log("[*] Запись...")
 
