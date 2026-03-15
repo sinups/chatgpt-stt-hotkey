@@ -396,9 +396,12 @@ def do_recording():
 
         log("[*] Recording...")
 
-        # 5. Wait for Fn release
-        deadline = time.time() + 60
-        while fn_pressed and time.time() < deadline:
+        # 5. Wait for Fn release (min 0.5s recording to avoid instant stop)
+        rec_start = time.time()
+        deadline = rec_start + 60
+        while time.time() < deadline:
+            if not fn_pressed and (time.time() - rec_start) > 0.5:
+                break
             time.sleep(0.05)
 
         # 6. Stop (recording may have auto-stopped on silence)
@@ -442,6 +445,7 @@ def event_cb(proxy, etype, event, refcon):
     global fn_pressed, last_fn_time
 
     if etype == Quartz.kCGEventTapDisabledByTimeout:
+        log("[!] Event tap re-enabled")
         Quartz.CGEventTapEnable(proxy, True)
         return event
 
