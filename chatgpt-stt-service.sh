@@ -3,7 +3,7 @@
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
 PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3"
-SCRIPT="/Users/sinups/Projects/chatgpt-stt-hotkey/chatgpt_stt.py"
+SCRIPT="$(cd "$(dirname "$0")" && pwd)/chatgpt_stt.py"
 
 while true; do
     # Ждём пока ChatGPT запустится
