@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-ChatGPT STT — Push-to-talk на Fn через виджет.
+ChatGPT STT — Push-to-talk on Fn via ChatGPT widget.
 
-Зажми Fn → виджет + запись.
-Отпусти Fn → текст в буфер → Cmd+V.
+Hold Fn -> widget opens, recording starts.
+Release Fn -> transcription copied to clipboard -> Cmd+V to paste.
 """
 
 import subprocess
@@ -21,7 +21,6 @@ def log(msg):
     sys.stdout.flush()
 
 
-# ─── Состояние ───
 state = "idle"
 state_lock = threading.Lock()
 fn_pressed = False
@@ -29,7 +28,6 @@ last_fn_time = 0
 FN_FLAG = 0x800000
 DEBOUNCE = 0.4
 
-# Кэш: смещение кнопки микрофона от левого верхнего угла виджета
 _cached_mic_dx = None
 _cached_mic_dy = None
 
@@ -39,7 +37,7 @@ def _jxa(s, t=5):
         r = subprocess.run(['osascript', '-l', 'JavaScript', '-e', s],
                            capture_output=True, text=True, timeout=t)
         return r.stdout.strip()
-    except:
+    except Exception:
         return ""
 
 
@@ -60,7 +58,6 @@ def _active_app():
 
 
 def _open_widget():
-    """Открыть виджет через CGEvent Option+Space (обходит зажатый Fn)."""
     evt = Quartz.CGEventCreateKeyboardEvent(None, 49, True)
     Quartz.CGEventSetFlags(evt, Quartz.kCGEventFlagMaskAlternate)
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, evt)
@@ -70,12 +67,9 @@ def _open_widget():
 
 
 def _close_widget():
-    """Закрыть виджет: фокус на ChatGPT → Escape."""
-    # Сначала убеждаемся что ChatGPT в фокусе
     subprocess.run(['osascript', '-e', 'tell application "ChatGPT" to activate'],
                    capture_output=True, timeout=3)
     time.sleep(0.15)
-    # Escape
     evt = Quartz.CGEventCreateKeyboardEvent(None, 53, True)
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, evt)
     evt2 = Quartz.CGEventCreateKeyboardEvent(None, 53, False)
@@ -83,7 +77,6 @@ def _close_widget():
 
 
 def _has_widget():
-    """Проверить, открыт ли виджет."""
     r = _jxa('''
     function run() {
         const p = Application("System Events").processes["ChatGPT"];
@@ -98,7 +91,6 @@ def _has_widget():
 
 
 def _get_widget_pos():
-    """Получить позицию виджета: {wx, wy}."""
     r = _jxa('''
     function run() {
         const p = Application("System Events").processes["ChatGPT"];
@@ -116,13 +108,12 @@ def _get_widget_pos():
     if r:
         try:
             return json.loads(r)
-        except:
+        except Exception:
             pass
     return None
 
 
 def _find_mic_in_widget():
-    """Найти микрофон и вернуть (абс_x, абс_y, offset_dx, offset_dy)."""
     r = _jxa('''
     function run() {
         const p = Application("System Events").processes["ChatGPT"];
@@ -154,13 +145,12 @@ def _find_mic_in_widget():
     if r:
         try:
             return json.loads(r)
-        except:
+        except Exception:
             pass
     return None
 
 
 def _find_stop_in_widget():
-    """Найти стоп-кнопку (галочку) в виджете."""
     r = _jxa('''
     function run() {
         const p = Application("System Events").processes["ChatGPT"];
@@ -188,13 +178,12 @@ def _find_stop_in_widget():
         try:
             d = json.loads(r)
             return int(d['x']), int(d['y'])
-        except:
+        except Exception:
             pass
     return None
 
 
 def _btn_count():
-    """Количество кнопок в виджете (3 = запись, 9+ = обычный)."""
     r = _jxa('''
     function run() {
         const p = Application("System Events").processes["ChatGPT"];
@@ -208,7 +197,7 @@ def _btn_count():
     ''')
     try:
         return int(r)
-    except:
+    except Exception:
         return 0
 
 
@@ -246,20 +235,18 @@ def _clear_widget():
 
 def _restore_app(bundle_id):
     if bundle_id:
+        safe_id = bundle_id.replace('\\', '\\\\').replace('"', '\\"')
         subprocess.run(['osascript', '-e', f'''
             tell application "System Events"
                 try
-                    set t to first process whose bundle identifier is "{bundle_id}"
+                    set t to first process whose bundle identifier is "{safe_id}"
                     set frontmost of t to true
                 end try
             end tell
         '''], capture_output=True, timeout=3)
 
 
-# ─── Цикл записи ───
-
 def _find_cancel_in_widget():
-    """Найти кнопку X (отмена) в режиме записи — слева."""
     r = _jxa('''
     function run() {
         const p = Application("System Events").processes["ChatGPT"];
@@ -287,13 +274,12 @@ def _find_cancel_in_widget():
         try:
             d = json.loads(r)
             return int(d['x']), int(d['y'])
-        except:
+        except Exception:
             pass
     return None
 
 
 def _force_close():
-    """Принудительно закрыть виджет: отменить запись если идёт, потом Escape."""
     for _ in range(3):
         if not _has_widget():
             return
@@ -308,11 +294,9 @@ def _force_close():
 
 
 def _wait_normal(timeout=5):
-    """Ждём пока кнопки вернутся в нормальный режим (> 4) после стопа."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        bc = _btn_count()
-        if bc > 4:
+        if _btn_count() > 4:
             return True
         time.sleep(0.3)
     return False
@@ -329,12 +313,12 @@ def do_recording():
     prev_app = _active_app()
 
     try:
-        # 0. Закрываем зависший виджет если есть
+        # 0. Close stale widget if any
         if _has_widget():
             _force_close()
-            time.sleep(0.3)  # пауза после закрытия перед повторным открытием
+            time.sleep(0.3)
 
-        # 1. Открываем виджет (поллинг)
+        # 1. Open widget (polling)
         _open_widget()
         widget_ready = False
         for _ in range(20):
@@ -353,14 +337,14 @@ def do_recording():
                     break
 
         if not widget_ready:
-            log("[!] Виджет не открылся")
+            log("[!] Widget failed to open")
             return
 
-        # 2. Очищаем поле
+        # 2. Clear input
         _clear_widget()
         time.sleep(0.1)
 
-        # 3. Кликаем микрофон (кэш или поиск)
+        # 3. Click mic (cached or search)
         mic_x, mic_y = None, None
 
         if _cached_mic_dx is not None:
@@ -377,15 +361,15 @@ def do_recording():
                 _cached_mic_dy = mic_info['dy']
 
         if mic_x is None:
-            log("[!] Микрофон не найден")
+            log("[!] Mic button not found")
             _force_close()
             return
 
         _click(mic_x, mic_y)
 
-        # Поллим начало записи (вместо sleep 0.5)
+        # 4. Poll for recording start
         rec_started = False
-        for _ in range(15):  # макс 0.75 сек
+        for _ in range(15):
             time.sleep(0.05)
             bc = _btn_count()
             if 0 < bc <= 4:
@@ -393,7 +377,6 @@ def do_recording():
                 break
 
         if not rec_started:
-            # Retry: сбрасываем кэш, ищем заново
             _cached_mic_dx = None
             _cached_mic_dy = None
             mic_info = _find_mic_in_widget()
@@ -407,27 +390,26 @@ def do_recording():
                         break
 
         if not rec_started:
-            log("[!] Запись не началась")
+            log("[!] Recording failed to start")
             _force_close()
             return
 
-        log("[*] Запись...")
+        log("[*] Recording...")
 
-        # 5. Ждём отпускания Fn (таймаут 60 сек)
+        # 5. Wait for Fn release
         deadline = time.time() + 60
         while fn_pressed and time.time() < deadline:
             time.sleep(0.05)
 
-        # 6. Стоп — запись может уже остановиться сама (тишина)
+        # 6. Stop (recording may have auto-stopped on silence)
         bc = _btn_count()
         if 0 < bc <= 4:
-            # Ещё записывает — кликаем стоп
             stop = _find_stop_in_widget()
             if stop:
                 _click(stop[0], stop[1])
             _wait_normal(5)
 
-        # 7. Ждём транскрипцию
+        # 7. Wait for transcription
         text = ""
         for _ in range(20):
             time.sleep(0.5)
@@ -436,19 +418,19 @@ def do_recording():
                 text = t.strip()
                 break
 
-        # 9. Копируем и закрываем
+        # 8. Copy to clipboard and close
         if text:
             _clipboard(text)
             log(f"[+] {text[:80]}{'...' if len(text) > 80 else ''}")
         else:
-            log("[-] Пусто")
+            log("[-] Empty")
 
         _force_close()
         time.sleep(0.15)
         _restore_app(prev_app)
 
     except Exception as e:
-        log(f"[!] Ошибка: {e}")
+        log(f"[!] Error: {e}")
         _force_close()
 
     finally:
@@ -456,12 +438,9 @@ def do_recording():
             state = "idle"
 
 
-# ─── Event callback ───
-
 def event_cb(proxy, etype, event, refcon):
     global fn_pressed, last_fn_time
 
-    # Event tap может отключиться — проверяем
     if etype == Quartz.kCGEventTapDisabledByTimeout:
         Quartz.CGEventTapEnable(proxy, True)
         return event
@@ -486,42 +465,10 @@ def event_cb(proxy, etype, event, refcon):
     return event
 
 
-# ─── Main ───
-
 def main():
     log("=" * 40)
     log("  ChatGPT STT — Fn push-to-talk")
     log("=" * 40)
-
-    if '--test' in sys.argv:
-        log("\n[TEST] Открываю виджет...")
-        _open_widget()
-        time.sleep(0.8)
-        _clear_widget()
-        time.sleep(0.2)
-        mic_info = _find_mic_in_widget()
-        assert mic_info, "Микрофон не найден!"
-        log(f"[TEST] Микрофон: ({int(mic_info['x'])}, {int(mic_info['y'])})")
-        _click(int(mic_info['x']), int(mic_info['y']))
-        time.sleep(1)
-        stop = _find_stop_in_widget()
-        if stop:
-            log("[TEST] Запись! Говори 3 сек...")
-            time.sleep(3)
-            _click(stop[0], stop[1])
-            time.sleep(3)
-            text = _read_widget_text()
-            if text and text.strip():
-                _clipboard(text.strip())
-                log(f"[TEST] '{text.strip()[:100]}'")
-                log("[TEST] В буфере!")
-            else:
-                log("[TEST] Пусто")
-        else:
-            log("[TEST] Запись не началась")
-        _close_widget()
-        log("[TEST] Готово!\n")
-        return
 
     if subprocess.run(['which', 'cliclick'], capture_output=True).returncode != 0:
         log("[!] brew install cliclick"); sys.exit(1)
@@ -530,7 +477,7 @@ def main():
         ['osascript', '-e', 'tell application "System Events" to get name of every process whose name is "ChatGPT"'],
         capture_output=True, text=True)
     if 'ChatGPT' not in r.stdout:
-        log("[!] Запустите ChatGPT"); sys.exit(1)
+        log("[!] Start ChatGPT first"); sys.exit(1)
 
     tap = Quartz.CGEventTapCreate(
         Quartz.kCGSessionEventTap, Quartz.kCGHeadInsertEventTap,
@@ -538,14 +485,14 @@ def main():
         Quartz.CGEventMaskBit(Quartz.kCGEventFlagsChanged),
         event_cb, None)
     if not tap:
-        log("[!] Accessibility!"); sys.exit(1)
+        log("[!] Accessibility permission required"); sys.exit(1)
 
     src = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
     Quartz.CFRunLoopAddSource(Quartz.CFRunLoopGetCurrent(), src, Quartz.kCFRunLoopDefaultMode)
     Quartz.CGEventTapEnable(tap, True)
 
-    log("[*] Fn → говори → отпусти → Cmd+V")
-    log("[*] Ctrl+C выход\n")
+    log("[*] Fn -> speak -> release -> Cmd+V")
+    log("[*] Ctrl+C to quit\n")
 
     signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
     try:
