@@ -37,9 +37,10 @@ stt-log       # логи
 ## Удаление
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.sinups.chatgpt-stt.plist
-rm ~/Library/LaunchAgents/com.sinups.chatgpt-stt.plist
+launchctl unload ~/Library/LaunchAgents/com.chatgpt-stt.plist
+rm ~/Library/LaunchAgents/com.chatgpt-stt.plist
 rm -rf ~/Projects/chatgpt-stt-hotkey
+# Удалить алиасы stt-* из ~/.zshrc
 ```
 
 ## Технические детали

@@ -2,11 +2,13 @@
 set -e
 
 # ChatGPT STT Hotkey — установка
-# Использование: curl -fsSL https://raw.githubusercontent.com/sinups/chatgpt-stt-hotkey/main/install.sh | bash
+# curl -fsSL https://raw.githubusercontent.com/sinups/chatgpt-stt-hotkey/main/install.sh | bash
 
+REPO="https://github.com/sinups/chatgpt-stt-hotkey.git"
+RAW="https://raw.githubusercontent.com/sinups/chatgpt-stt-hotkey/main"
 DIR="$HOME/Projects/chatgpt-stt-hotkey"
-PLIST="$HOME/Library/LaunchAgents/com.sinups.chatgpt-stt.plist"
-PYTHON=""
+LABEL="com.chatgpt-stt"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
@@ -14,99 +16,88 @@ echo "  ║  ChatGPT STT — Push-to-talk на Fn   ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
 
-# ─── Проверки ───
-
+# ─── macOS ───
 if [[ "$(uname)" != "Darwin" ]]; then
     echo "❌ Только macOS"; exit 1
 fi
+echo "✓ macOS $(sw_vers -productVersion)"
 
-if ! ls /Applications/ChatGPT.app &>/dev/null; then
-    echo "❌ ChatGPT не установлен"
-    echo "   Скачайте: https://openai.com/chatgpt/mac/"
+# ─── ChatGPT ───
+if [[ ! -d "/Applications/ChatGPT.app" ]]; then
+    echo "❌ ChatGPT не установлен → https://openai.com/chatgpt/mac/"
     exit 1
 fi
+echo "✓ ChatGPT.app"
 
-# Python
+# ─── Python с pyobjc ───
+PYTHON=""
 for p in \
-    /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
-    /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 \
+    /Library/Frameworks/Python.framework/Versions/3.*/bin/python3 \
     /opt/homebrew/bin/python3 \
-    /usr/local/bin/python3 \
-    /usr/bin/python3; do
-    if [[ -x "$p" ]]; then
-        # Проверяем pyobjc
-        if "$p" -c "import Quartz, AppKit" 2>/dev/null; then
-            PYTHON="$p"
-            break
-        fi
+    /usr/local/bin/python3; do
+    if [[ -x "$p" ]] && "$p" -c "import Quartz, AppKit" 2>/dev/null; then
+        PYTHON="$p"
+        break
     fi
 done
 
 if [[ -z "$PYTHON" ]]; then
     echo "❌ Python 3 с pyobjc не найден"
-    echo "   Установите:"
+    echo ""
     echo "   brew install python@3.12"
     echo "   pip3 install pyobjc-framework-Quartz pyobjc-framework-Cocoa"
     exit 1
 fi
-
-echo "✓ macOS $(sw_vers -productVersion)"
-echo "✓ ChatGPT.app"
 echo "✓ Python: $PYTHON"
 
-# Homebrew
+# ─── Homebrew + cliclick ───
 if ! command -v brew &>/dev/null; then
-    echo "❌ Homebrew не найден"
-    echo "   /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    echo "❌ Homebrew → https://brew.sh"
     exit 1
 fi
-echo "✓ Homebrew"
 
-# cliclick
 if ! command -v cliclick &>/dev/null; then
     echo "→ Устанавливаю cliclick..."
     brew install cliclick
 fi
 echo "✓ cliclick"
 
-# ─── Скачиваем / обновляем ───
+# ─── Скачиваем ───
+echo "→ Скачиваю..."
 
 if [[ -d "$DIR/.git" ]]; then
-    echo "→ Обновляю..."
     cd "$DIR"
     git pull --ff-only 2>/dev/null || true
+elif command -v git &>/dev/null; then
+    rm -rf "$DIR"
+    git clone "$REPO" "$DIR" 2>/dev/null || {
+        mkdir -p "$DIR"
+        curl -fsSL "$RAW/chatgpt_stt.py" -o "$DIR/chatgpt_stt.py"
+        curl -fsSL "$RAW/chatgpt-stt-service.sh" -o "$DIR/chatgpt-stt-service.sh"
+    }
 else
-    echo "→ Скачиваю..."
     mkdir -p "$DIR"
-    cd "$DIR"
-    if command -v git &>/dev/null; then
-        git clone https://github.com/sinups/chatgpt-stt-hotkey.git "$DIR" 2>/dev/null || {
-            # Fallback: скачиваем файлы напрямую
-            curl -fsSL "https://raw.githubusercontent.com/sinups/chatgpt-stt-hotkey/main/chatgpt_stt.py" -o chatgpt_stt.py
-            curl -fsSL "https://raw.githubusercontent.com/sinups/chatgpt-stt-hotkey/main/chatgpt-stt-service.sh" -o chatgpt-stt-service.sh
-        }
-    fi
+    curl -fsSL "$RAW/chatgpt_stt.py" -o "$DIR/chatgpt_stt.py"
+    curl -fsSL "$RAW/chatgpt-stt-service.sh" -o "$DIR/chatgpt-stt-service.sh"
 fi
 
-chmod +x "$DIR/chatgpt_stt.py" "$DIR/chatgpt-stt-service.sh" 2>/dev/null
+cd "$DIR"
+chmod +x chatgpt_stt.py chatgpt-stt-service.sh 2>/dev/null || true
+sed -i '' "s|^PYTHON=.*|PYTHON=\"$PYTHON\"|" chatgpt-stt-service.sh
 
-# Прописываем правильный Python в service.sh
-sed -i '' "s|^PYTHON=.*|PYTHON=\"$PYTHON\"|" "$DIR/chatgpt-stt-service.sh"
+echo "✓ Файлы в $DIR"
 
-# ─── Служба ───
-
+# ─── Служба launchd ───
 echo "→ Настраиваю службу..."
-
-# Останавливаем старую если есть
 launchctl unload "$PLIST" 2>/dev/null || true
 
-cat > "$PLIST" << PLISTEOF
+cat > "$PLIST" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.sinups.chatgpt-stt</string>
+    <string>$LABEL</string>
     <key>ProgramArguments</key>
     <array>
         <string>$DIR/chatgpt-stt-service.sh</string>
@@ -126,70 +117,72 @@ cat > "$PLIST" << PLISTEOF
     <string>Interactive</string>
 </dict>
 </plist>
-PLISTEOF
+EOF
+
+echo "✓ Служба настроена"
 
 # ─── Accessibility ───
-
-# Определяем Python.app
-PYTHON_APP=$(dirname "$(dirname "$(dirname "$PYTHON")")")/Resources/Python.app
-if [[ ! -d "$PYTHON_APP" ]]; then
-    PYTHON_APP="$PYTHON"
+PYTHON_APP=""
+PYDIR="$(dirname "$(dirname "$PYTHON")")"
+if [[ -d "$PYDIR/Resources/Python.app" ]]; then
+    PYTHON_APP="$PYDIR/Resources/Python.app"
 fi
 
 echo ""
-echo "┌─────────────────────────────────────────────┐"
-echo "│  ⚠️  Нужно разрешить Accessibility           │"
-echo "├─────────────────────────────────────────────┤"
-echo "│  1. Откроется System Settings               │"
-echo "│  2. Нажми + внизу списка                    │"
-echo "│  3. Cmd+Shift+G → вставь путь:             │"
+echo "┌───────────────────────────────────────────────┐"
+echo "│  ⚠️  Нужно добавить Python в Accessibility     │"
+echo "├───────────────────────────────────────────────┤"
+echo "│  1. Откроется System Settings                 │"
+echo "│  2. Нажми + внизу                             │"
+echo "│  3. Cmd+Shift+G, вставь:                     │"
+if [[ -n "$PYTHON_APP" ]]; then
 echo "│     $PYTHON_APP"
-echo "│  4. Нажми Open, убедись что ✓ стоит         │"
-echo "└─────────────────────────────────────────────┘"
+else
+echo "│     $PYTHON"
+fi
+echo "│  4. Open → галочка ✓                         │"
+echo "└───────────────────────────────────────────────┘"
 echo ""
-read -p "Нажми Enter чтобы открыть настройки..."
 
 open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 
-echo ""
-read -p "Добавил Python.app в Accessibility? (y/n) " answer
-if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
-    echo "⚠️  Без Accessibility скрипт не сможет управлять виджетом."
-    echo "   Добавь позже и перезапусти: stt-restart"
+# read из /dev/tty для совместимости с curl | bash
+if [[ -t 0 ]]; then
+    read -p "Добавил? (Enter) "
+else
+    read -p "Добавил? (Enter) " < /dev/tty 2>/dev/null || sleep 5
 fi
 
 # ─── Запуск ───
-
-echo "→ Запускаю..."
-launchctl load "$PLIST"
+echo "→ Запускаю службу..."
+launchctl load "$PLIST" 2>/dev/null || true
 sleep 2
 
-if launchctl list | grep -q "com.sinups.chatgpt-stt"; then
+if launchctl list 2>/dev/null | grep -q "$LABEL"; then
     echo "✓ Служба запущена"
 else
-    echo "⚠️  Служба не запустилась. Проверь: stt-log"
+    echo "⚠️  Проверь: tail -10 /tmp/chatgpt-stt.log"
 fi
 
 # ─── Алиасы ───
+RC="$HOME/.zshrc"
+[[ ! -f "$RC" ]] && RC="$HOME/.bashrc"
 
-SHELL_RC="$HOME/.zshrc"
-[[ -f "$HOME/.bashrc" ]] && [[ ! -f "$HOME/.zshrc" ]] && SHELL_RC="$HOME/.bashrc"
-
-if ! grep -q "stt-status" "$SHELL_RC" 2>/dev/null; then
-    cat >> "$SHELL_RC" << 'ALIASEOF'
-
-# ChatGPT STT service
-alias stt-status='launchctl list com.sinups.chatgpt-stt 2>/dev/null && echo "Log:" && tail -3 /tmp/chatgpt-stt.log'
-alias stt-restart='launchctl unload ~/Library/LaunchAgents/com.sinups.chatgpt-stt.plist 2>/dev/null; launchctl load ~/Library/LaunchAgents/com.sinups.chatgpt-stt.plist && echo "STT restarted"'
-alias stt-stop='launchctl unload ~/Library/LaunchAgents/com.sinups.chatgpt-stt.plist 2>/dev/null && echo "STT stopped"'
-alias stt-log='tail -20 /tmp/chatgpt-stt.log'
-ALIASEOF
-    echo "✓ Алиасы добавлены в $SHELL_RC"
+if [[ -f "$RC" ]] && ! grep -q "chatgpt-stt" "$RC" 2>/dev/null; then
+    {
+        echo ""
+        echo "# ChatGPT STT"
+        echo "alias stt-status='launchctl list $LABEL 2>/dev/null && tail -3 /tmp/chatgpt-stt.log'"
+        echo "alias stt-restart='launchctl unload $PLIST 2>/dev/null; launchctl load $PLIST && echo \"STT restarted\"'"
+        echo "alias stt-stop='launchctl unload $PLIST 2>/dev/null && echo \"STT stopped\"'"
+        echo "alias stt-log='tail -20 /tmp/chatgpt-stt.log'"
+    } >> "$RC"
+    echo "✓ Алиасы (source $RC)"
 fi
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║  ✅ Установка завершена!             ║"
+echo "  ║  ✅ Готово!                          ║"
 echo "  ║                                      ║"
 echo "  ║  Fn (зажать) → говори → отпусти     ║"
 echo "  ║  Cmd+V для вставки                   ║"
