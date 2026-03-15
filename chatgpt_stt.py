@@ -330,18 +330,21 @@ def do_recording():
 
     try:
         # 0. Закрываем зависший виджет если есть
-        _force_close()
+        if _has_widget():
+            _force_close()
+            time.sleep(0.3)  # пауза после закрытия перед повторным открытием
 
-        # 1. Открываем виджет (поллинг вместо sleep)
+        # 1. Открываем виджет (поллинг)
         _open_widget()
         widget_ready = False
-        for _ in range(20):  # макс 1 сек
+        for _ in range(20):
             time.sleep(0.05)
             if _has_widget():
                 widget_ready = True
                 break
 
         if not widget_ready:
+            time.sleep(0.3)
             _open_widget()
             for _ in range(20):
                 time.sleep(0.05)
@@ -415,20 +418,16 @@ def do_recording():
         while fn_pressed and time.time() < deadline:
             time.sleep(0.05)
 
-        # 6. Стоп
-        stop = _find_stop_in_widget()
-        if stop:
-            _click(stop[0], stop[1])
-        else:
-            log("[!] Стоп не найден")
-            _force_close()
-            _restore_app(prev_app)
-            return
+        # 6. Стоп — запись может уже остановиться сама (тишина)
+        bc = _btn_count()
+        if 0 < bc <= 4:
+            # Ещё записывает — кликаем стоп
+            stop = _find_stop_in_widget()
+            if stop:
+                _click(stop[0], stop[1])
+            _wait_normal(5)
 
-        # 7. Ждём пока запись остановится
-        _wait_normal(5)
-
-        # 8. Ждём транскрипцию
+        # 7. Ждём транскрипцию
         text = ""
         for _ in range(20):
             time.sleep(0.5)
