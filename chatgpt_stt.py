@@ -70,7 +70,12 @@ def _open_widget():
 
 
 def _close_widget():
-    """Закрыть виджет через Escape (CGEvent)."""
+    """Закрыть виджет: фокус на ChatGPT → Escape."""
+    # Сначала убеждаемся что ChatGPT в фокусе
+    subprocess.run(['osascript', '-e', 'tell application "ChatGPT" to activate'],
+                   capture_output=True, timeout=3)
+    time.sleep(0.15)
+    # Escape
     evt = Quartz.CGEventCreateKeyboardEvent(None, 53, True)
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, evt)
     evt2 = Quartz.CGEventCreateKeyboardEvent(None, 53, False)
